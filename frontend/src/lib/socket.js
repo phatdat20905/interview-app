@@ -127,6 +127,19 @@ export const emitLanguageChange = (roomId, language, userId) => {
   }
 };
 
+/**
+ * Emit a run-code event to ask other clients in the room to execute code
+ * @param {string} roomId
+ * @param {string} code
+ * @param {string} language
+ * @param {string} userId
+ */
+export const emitRunCode = (roomId, code, language, userId) => {
+  if (socket?.connected) {
+    socket.emit("run-code", { roomId, code, language, userId });
+  }
+};
+
 export default {
   getSocket,
   disconnectSocket,

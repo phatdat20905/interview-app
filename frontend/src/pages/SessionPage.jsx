@@ -17,7 +17,7 @@ import { StreamCall, StreamVideo } from "@stream-io/video-react-sdk";
 import VideoCallUI from "../components/VideoCallUI";
 
 // Import Socket.IO utilities
-import { getSocket, joinRoom, leaveRoom } from "../lib/socket";
+import { getSocket, joinRoom, leaveRoom, emitRunCode } from "../lib/socket";
 
 function SessionPage() {
   const navigate = useNavigate();
@@ -132,6 +132,26 @@ function SessionPage() {
       setActiveUsers(users.filter((u) => u.userId !== user.id)); // Exclude self
     });
 
+    // Listen for run-code events from other participants
+    socketInstance.on("run-code", async ({ code: remoteCode, language: remoteLang, userId: runnerId }) => {
+      try {
+        // Simple indication: show who triggered the run (self vs peer)
+        const runnerLabel = runnerId === user.id ? "You" : "A participant";
+        toast(`${runnerLabel} ran the code`, { icon: "⚡" });
+
+        // Execute the code locally to present the same output
+        setIsRunning(true);
+        setOutput(null);
+        const result = await executeCode(remoteLang, remoteCode);
+        setOutput(result);
+      } catch (err) {
+        console.error("Error executing remote run-code:", err);
+        toast.error("Failed to execute remote run");
+      } finally {
+        setIsRunning(false);
+      }
+    });
+
     // Cleanup on unmount or when session ends
     return () => {
       leaveRoom(id);
@@ -140,6 +160,7 @@ function SessionPage() {
       socketInstance.off("user-joined");
       socketInstance.off("user-left");
       socketInstance.off("room-users");
+      socketInstance.off("run-code");
       socketInstance.off("connect", initializeCollaboration);
     };
   }, [user, session, loadingSession, id]);
@@ -161,6 +182,15 @@ function SessionPage() {
     const result = await executeCode(selectedLanguage, code);
     setOutput(result);
     setIsRunning(false);
+
+    // Notify other participants to run the same code (they will receive "run-code" and execute locally)
+    try {
+      if (socket && socket.connected) {
+        emitRunCode(id, code, selectedLanguage, user.id);
+      }
+    } catch (err) {
+      console.warn("Failed to emit run-code event:", err);
+    }
   };
 
   const handleEndSession = () => {

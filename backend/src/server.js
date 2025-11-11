@@ -101,6 +101,17 @@ io.on("connection", (socket) => {
     });
   });
 
+  // Handle run-code event: broadcast run request to other clients in the room
+  socket.on("run-code", ({ roomId, code, language, userId }) => {
+    // Broadcast to others so they can execute locally and display same output
+    socket.to(roomId).emit("run-code", {
+      code,
+      language,
+      userId,
+      timestamp: Date.now(),
+    });
+  });
+
   // Handle disconnection
   socket.on("disconnect", () => {
     console.log(`Socket disconnected: ${socket.id}`);
