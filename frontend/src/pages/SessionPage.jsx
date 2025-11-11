@@ -10,10 +10,14 @@ import { getDifficultyBadgeClass } from "../lib/utils";
 import { Loader2Icon, LogOutIcon, PhoneOffIcon } from "lucide-react";
 import CodeEditorPanel from "../components/CodeEditorPanel";
 import OutputPanel from "../components/OutputPanel";
+import toast from "react-hot-toast";
 
 import useStreamClient from "../hooks/useStreamClient";
 import { StreamCall, StreamVideo } from "@stream-io/video-react-sdk";
 import VideoCallUI from "../components/VideoCallUI";
+
+// Import Socket.IO utilities
+import { getSocket, joinRoom, leaveRoom } from "../lib/socket";
 
 function SessionPage() {
   const navigate = useNavigate();
@@ -21,6 +25,8 @@ function SessionPage() {
   const { user } = useUser();
   const [output, setOutput] = useState(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [socket, setSocket] = useState(null);
+  const [activeUsers, setActiveUsers] = useState([]);
 
   const { data: sessionData, isLoading: loadingSession, refetch } = useSessionById(id);
 
@@ -69,6 +75,75 @@ function SessionPage() {
       setCode(problemData.starterCode[selectedLanguage]);
     }
   }, [problemData, selectedLanguage]);
+
+  // ===== SOCKET.IO INTEGRATION FOR REAL-TIME COLLABORATION =====
+  useEffect(() => {
+    if (!user || !session || loadingSession) return;
+    
+    // Initialize socket connection
+    const socketInstance = getSocket();
+    
+    // Wait for socket to connect before joining room
+    const initializeCollaboration = () => {
+      if (!socketInstance.connected) return;
+
+      setSocket(socketInstance);
+
+      // Join the room with user info
+      const roomId = id;
+      const userId = user.id;
+      const userName = user.fullName || user.firstName || "Anonymous";
+
+      joinRoom(roomId, userId, userName);
+    };
+
+    // If already connected, join immediately
+    if (socketInstance.connected) {
+      initializeCollaboration();
+    } else {
+      // Wait for connection
+      socketInstance.on("connect", initializeCollaboration);
+    }
+
+    // Set socket state regardless (for UI purposes)
+    setSocket(socketInstance);
+
+    // Listen for user joined events
+    socketInstance.on("user-joined", ({ userId: joinedUserId, userName: joinedUserName }) => {
+      toast.success(`${joinedUserName} joined the session`);
+      
+      // Add to active users if not already there
+      setActiveUsers((prev) => {
+        if (prev.some((u) => u.userId === joinedUserId)) return prev;
+        return [...prev, { userId: joinedUserId, userName: joinedUserName }];
+      });
+    });
+
+    // Listen for user left events
+    socketInstance.on("user-left", ({ userId: leftUserId, userName: leftUserName }) => {
+      toast(`${leftUserName} left the session`, { icon: "👋" });
+      
+      // Remove from active users
+      setActiveUsers((prev) => prev.filter((u) => u.userId !== leftUserId));
+    });
+
+    // Listen for room users list (when joining)
+    socketInstance.on("room-users", (users) => {
+      setActiveUsers(users.filter((u) => u.userId !== user.id)); // Exclude self
+    });
+
+    // Cleanup on unmount or when session ends
+    return () => {
+      leaveRoom(id);
+      
+      // Remove listeners
+      socketInstance.off("user-joined");
+      socketInstance.off("user-left");
+      socketInstance.off("room-users");
+      socketInstance.off("connect", initializeCollaboration);
+    };
+  }, [user, session, loadingSession, id]);
+  // ===== END SOCKET.IO INTEGRATION =====
 
   const handleLanguageChange = (e) => {
     const newLang = e.target.value;
@@ -239,6 +314,10 @@ function SessionPage() {
                       onLanguageChange={handleLanguageChange}
                       onCodeChange={(value) => setCode(value)}
                       onRunCode={handleRunCode}
+                      socket={socket}
+                      roomId={id}
+                      userId={user?.id}
+                      activeUsers={activeUsers}
                     />
                   </Panel>
 
